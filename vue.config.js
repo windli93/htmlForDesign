@@ -3,12 +3,15 @@ const CopyWebpackPlugin = require('copy-webpack-plugin')
 
 const pages = {}
 
-const chromeName = ['popup', 'background', 'options', 'content']
+const chromeName = ['popup', 'background', 'options', 'content', 'offscreen']
 
 chromeName.forEach((name) => {
+  const template = name === 'offscreen'
+    ? `src/pages/${name}/index.html`
+    : 'public/index.html'
   pages[name] = {
     entry: `src/pages/${name}/main.js`,
-    template: 'public/index.html',
+    template,
     filename: `${name}.html`
   }
 })

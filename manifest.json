@@ -1,25 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "vue3-chrome-ext",
-  "description": "chrome extension",
-  "version": "0.0.1",
-  "options_ui": {
-    "page": "options.html",
-    "open_in_tab": true
-  },
-  "action": {
-    "default_popup": "popup.html"
-  },
+  "name": "HTML ↔ Axure RP Converter",
+  "version": "1.0.0",
+  "description": "在 HTML 文件与 Axure RP 原型文件之间双向转换",
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage",
+    "offscreen"
+  ],
+
   "background": {
-    "service_worker": "js/background.js"
+    "service_worker": "js/background.js",
+    "type": "module"
   },
-  "permissions": ["storage", "activeTab"],
-  "host_permissions": ["http://*/*", "https://*/*"],
-  "content_scripts": [{
-    "matches": ["http://*/*", "https://*/*"],
-    "js": ["js/content.js"],
-    "run_at": "document_start"
-  }],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
   }
