@@ -27,16 +27,24 @@ export function getMimeType(filename) {
 
 /**
  * Blob → base64 Data URL
+ *
+ * 注意：MV3 service worker 没有 FileReader / window，因此这里用
+ * blob.arrayBuffer() + 手写 base64 编码，确保在 SW 里也能跑。
  * @param {Blob} blob
- * @returns {Promise<string>}
+ * @returns {Promise<string>} 形如 "data:image/png;base64,...."
  */
-export function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onloadend = () => resolve(reader.result)
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
+export async function blobToBase64(blob) {
+  const buffer = await blob.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+  // 分块 base64，避免 String.fromCharCode 对超大数组报最大长度错误
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize))
+  }
+  const base64 = btoa(binary)
+  const mime = blob.type || 'image/png'
+  return `data:${mime};base64,${base64}`
 }
 
 /**
@@ -75,15 +83,15 @@ export function isDataUrl(url) {
 }
 
 /**
- * 检查 URL 是否为同域或可 CORS 请求
+ * 判断 URL 是否「可直接读取」（无需跨域 fetch）
+ *
+ * 注意：MV3 service worker 没有 window.location，无法做真正的同源比较。
+ * 这里退化为「data:/blob: 前缀视为可直接读取」，其余一律按跨域 fetch
+ * 处理（交给 fetch 本身的成功/失败决定）。调用方（SW 的 processImage）
+ * 已据此分支处理。
  * @param {string} url
  * @returns {boolean}
  */
 export function isSameOrigin(url) {
-  try {
-    const target = new URL(url)
-    return target.origin === window.location.origin
-  } catch {
-    return false
-  }
+  return isDataUrl(url) || (!!url && url.startsWith('blob:'))
 }

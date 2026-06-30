@@ -146,6 +146,9 @@ export default {
         chrome.runtime.sendMessage({
           type: MSG.CONVERT_HTML_FILES,
           payload: { files }
+        }).catch((err) => {
+          this.progress.t1 = '错误: 无法发送到后台（' + (err?.message || err) + '）'
+          this.converting = false
         })
       } catch (err) {
         this.progress.t1 = '错误: ' + err.message
@@ -162,7 +165,10 @@ export default {
 
       this.setProgressListener('t2')
 
-      chrome.runtime.sendMessage({ type: MSG.CAPTURE_TAB })
+      chrome.runtime.sendMessage({ type: MSG.CAPTURE_TAB }).catch((err) => {
+        this.progress.t2 = '错误: 无法发送到后台（' + (err?.message || err) + '）'
+        this.converting = false
+      })
     },
 
     // ========== F3: RP → HTML ==========
@@ -186,6 +192,9 @@ export default {
         chrome.runtime.sendMessage({
           type: MSG.PARSE_RP,
           payload: { rpBase64, fileName: this.rpFile.name }
+        }).catch((err) => {
+          this.progress.t3 = '错误: 无法发送到后台（' + (err?.message || err) + '）'
+          this.converting = false
         })
       } catch (err) {
         this.progress.t3 = '错误: ' + err.message

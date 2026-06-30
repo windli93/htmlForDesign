@@ -9,29 +9,37 @@ import { buildRpFile } from '../../lib/core/rp-builder.js'
 import { parseDocumentXml } from '../../lib/core/rp-parser.js'
 import { buildHtmlFromPage } from '../../lib/core/html-builder.js'
 import { createDocument, resetIdCounter } from '../../lib/core/widget-ir.js'
-import { blobToBase64, isSameOrigin } from '../../lib/utils/image.js'
+import { blobToBase64, isDataUrl } from '../../lib/utils/image.js'
 import JSZip from 'jszip'
 import { XMLParser } from 'fast-xml-parser'
 
 // ========== 消息路由 ==========
+//
+// 设计要点：popup 发来的指令消息（CAPTURE_TAB / CONVERT_HTML_FILES / PARSE_RP）
+// 都不带回调，因此 SW 不通过 sendResponse 回传完成态——sendResponse 只会回到
+// 「那条消息的发送方」，到不了 popup。所有进度/完成/错误统一用主动广播
+// （sendProgressToPopup / sendDoneToPopup / sendErrorToPopup）推给 popup，
+// popup 的 onSwMessage 监听到 DONE/ERROR 后复位 converting 状态。
+// CAPTURE_RESULT 来自 content script（也无回调），给它一个 ack 即可。
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
     case 'CAPTURE_TAB':
-      handleCaptureTab(sender.tab?.id, sendResponse)
-      return true // 异步响应
+      handleCaptureTab(sender.tab?.id)
+      return false // popup 无回调，不保持端口
 
     case 'CAPTURE_RESULT':
-      handleCaptureResult(msg.payload, sender.tab?.id, sendResponse)
-      return true
+      handleCaptureResult(msg.payload, sender.tab?.id)
+      sendResponse({ success: true }) // ack，避免 message port 警告
+      return false
 
     case 'CONVERT_HTML_FILES':
-      handleConvertHtmlFiles(msg.payload, sendResponse)
-      return true
+      handleConvertHtmlFiles(msg.payload)
+      return false
 
     case 'PARSE_RP':
-      handleParseRp(msg.payload, sendResponse)
-      return true
+      handleParseRp(msg.payload)
+      return false
 
     default:
       console.warn('[SW] 未知消息类型:', msg.type)
@@ -43,28 +51,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 /**
  * 处理捕获当前 Tab 的请求
+ * 只负责注入 content script；真正的抓取结果由 content script 通过
+ * CAPTURE_RESULT 消息异步送回，再由 handleCaptureResult 处理。
  * @param {number} tabId
- * @param {Function} sendResponse
  */
-async function handleCaptureTab(tabId, sendResponse) {
+async function handleCaptureTab(tabId) {
   try {
     if (!tabId) {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       tabId = tab.id
     }
 
-    // 注入共享库和 content script
+    sendProgressToPopup('正在注入 DOM 抓取脚本...')
+
+    // 注入 content script（webpack 已把 extract-raw-dom 打包进 js/content.js）
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['js/content.js']
     })
 
-    // 等待 content script 发送 CAPTURE_RESULT
-    // 实际 CAPTURE_RESULT 由 onMessage 路由到 handleCaptureResult
-    // 这里只是触发注入，返回的 sendResponse 在 handleCaptureResult 中处理
     sendProgressToPopup('DOM 脚本已注入，等待页面响应...')
   } catch (err) {
-    sendResponse({ type: 'ERROR', payload: { message: '注入失败: ' + err.message } })
+    sendErrorToPopup('注入失败: ' + err.message)
   }
 }
 
@@ -72,9 +80,8 @@ async function handleCaptureTab(tabId, sendResponse) {
  * 处理从 content script 返回的抓取结果
  * @param {Object} captureResult
  * @param {number} tabId
- * @param {Function} sendResponse
  */
-async function handleCaptureResult(captureResult, tabId, sendResponse) {
+async function handleCaptureResult(captureResult, tabId) {
   try {
     sendProgressToPopup('正在转换 DOM → IR...')
 
@@ -85,7 +92,7 @@ async function handleCaptureResult(captureResult, tabId, sendResponse) {
 
     sendProgressToPopup('正在构建 RP 文件...')
 
-    // 处理跨域图片
+    // 处理图片（base64 化）
     await processCrossOriginImages(pageIr, tabId)
 
     // 构建 .rp 文件
@@ -99,9 +106,9 @@ async function handleCaptureResult(captureResult, tabId, sendResponse) {
       saveAs: true
     })
 
-    sendResponse({ type: 'DONE', payload: { message: '转换完成！', downloadUrl: url } })
+    sendDoneToPopup('转换完成！已下载 .rp 文件')
   } catch (err) {
-    sendResponse({ type: 'ERROR', payload: { message: '转换失败: ' + err.message } })
+    sendErrorToPopup('转换失败: ' + err.message)
   }
 }
 
@@ -126,27 +133,29 @@ async function processCrossOriginImages(pageIr, tabId) {
 }
 
 /**
- * 处理单个图片（fetch 或截图降级）
+ * 处理单个图片（fetch 后 base64，失败降级为 warning）
+ *
+ * 注意：MV3 service worker 没有 FileReader / window，因此 base64 化必须用
+ * blob.arrayBuffer() + btoa；isSameOrigin 在 SW 里也无法判断（无 window.location），
+ * 这里统一用「data:/blob: 直接转，其余 fetch(cors) 尝试，失败即降级」。
  * @param {import('../../lib/core/widget-ir.js').WidgetIR} w
  * @param {number} tabId
  */
 async function processImage(w, tabId) {
   try {
-    if (isSameOrigin(w.src) || w.src.startsWith('data:')) {
-      // 同域或 data URL - 直接读取
-      const resp = await fetch(w.src)
-      const blob = await resp.blob()
-      w.src = await blobToBase64(blob)
+    if (isDataUrl(w.src) || w.src.startsWith('blob:')) {
+      // data URL / blob URL - 直接（或 fetch blob 后）转 base64 data URL
+      w.src = await blobToBase64(await (await fetch(w.src)).blob())
     } else {
-      // 跨域尝试 fetch
+      // 远程图片（无论同/跨域）都尝试 fetch(cors)
       const resp = await fetch(w.src, { mode: 'cors' })
       const blob = await resp.blob()
       w.src = await blobToBase64(blob)
     }
   } catch {
-    // CORS 失败，添加警告
+    // fetch 失败（CORS 拒绝等），降级为 warning，保留原 src
     w.warnings = w.warnings || []
-    w.warnings.push('无法获取跨域图片（无 CORS），请手动替换')
+    w.warnings.push('无法获取图片（可能跨域无 CORS），已保留原 URL：' + w.src)
   }
 }
 
@@ -156,9 +165,8 @@ async function processImage(w, tabId) {
  * 处理多 HTML 文件转换
  * @param {Object} payload
  * @param {Array<{name:string, html:string}>} payload.files
- * @param {Function} sendResponse
  */
-async function handleConvertHtmlFiles(payload, sendResponse) {
+async function handleConvertHtmlFiles(payload) {
   try {
     const doc = createDocument('9')
 
@@ -182,6 +190,7 @@ async function handleConvertHtmlFiles(payload, sendResponse) {
 
     // 关闭 offscreen 文档
     await chrome.offscreen.closeDocument()
+    offscreenCreated = false
 
     sendProgressToPopup('正在构建 RP 文件...')
 
@@ -195,9 +204,9 @@ async function handleConvertHtmlFiles(payload, sendResponse) {
       saveAs: true
     })
 
-    sendResponse({ type: 'DONE', payload: { message: '转换完成！', downloadUrl: url } })
+    sendDoneToPopup('转换完成！已下载 converted.rp')
   } catch (err) {
-    sendResponse({ type: 'ERROR', payload: { message: '转换失败: ' + err.message } })
+    sendErrorToPopup('转换失败: ' + err.message)
   }
 }
 
@@ -290,9 +299,8 @@ function sendToOffscreen(html) {
  * @param {Object} payload
  * @param {string} payload.rpBase64 - RP 文件的 base64 编码
  * @param {string} payload.fileName - 原文件名
- * @param {Function} sendResponse
  */
-async function handleParseRp(payload, sendResponse) {
+async function handleParseRp(payload) {
   try {
     sendProgressToPopup('正在解包 RP 文件...')
 
@@ -300,13 +308,28 @@ async function handleParseRp(payload, sendResponse) {
     const zip = await JSZip.loadAsync(payload.rpBase64, { base64: true })
 
     // 读取 document.xml
-    const docXml = await zip.file('document.xml').async('string')
+    const docXmlFile = zip.file('document.xml')
+    if (!docXmlFile) {
+      throw new Error(
+        '无法识别此 .rp 文件：未找到 document.xml。' +
+        '本插件当前仅支持按《实现方案》中推断的 "ZIP + document.xml" 结构解析，' +
+        '需使用 Axure RP 9 导出的样本做格式逆向后再支持。'
+      )
+    }
+    const docXml = await docXmlFile.async('string')
 
     sendProgressToPopup('正在解析文档结构...')
 
     // 解析 XML → DocumentIR
     resetIdCounter()
     const doc = parseDocumentXml(docXml)
+
+    if (!doc.pages || doc.pages.length === 0) {
+      throw new Error(
+        '解析未得到任何页面。该 .rp 文件的实际 XML 结构可能与插件内置解析器不一致，' +
+        '需按真实样本逆向修正 rp-parser.js。'
+      )
+    }
 
     // 提取图片资源
     const images = {}
@@ -356,9 +379,9 @@ async function handleParseRp(payload, sendResponse) {
       saveAs: true
     })
 
-    sendResponse({ type: 'DONE', payload: { message: '解析完成！', downloadUrl: url } })
+    sendDoneToPopup('解析完成！已下载 ' + outName)
   } catch (err) {
-    sendResponse({ type: 'ERROR', payload: { message: '解析失败: ' + err.message } })
+    sendErrorToPopup('解析失败: ' + err.message)
   }
 }
 
@@ -388,16 +411,41 @@ function replaceImageRefs(page, images) {
 // ========== 工具函数 ==========
 
 /**
+ * 向 popup 主动广播一条消息（统一封装，popup 关闭时忽略拒绝）
+ * @param {string} type - 'PROGRESS' | 'DONE' | 'ERROR'
+ * @param {string} message
+ */
+function broadcastToPopup(type, message) {
+  chrome.runtime.sendMessage({
+    type,
+    payload: { message }
+  }).catch(() => {
+    // popup 可能已关闭，忽略 "Receiving end does not exist" 错误
+  })
+}
+
+/**
  * 向 popup 发送进度消息
  * @param {string} message
  */
 function sendProgressToPopup(message) {
-  chrome.runtime.sendMessage({
-    type: 'PROGRESS',
-    payload: { message }
-  }).catch(() => {
-    // popup 可能已关闭，忽略错误
-  })
+  broadcastToPopup('PROGRESS', message)
+}
+
+/**
+ * 向 popup 发送完成消息（触发 popup 复位 converting）
+ * @param {string} message
+ */
+function sendDoneToPopup(message) {
+  broadcastToPopup('DONE', message)
+}
+
+/**
+ * 向 popup 发送错误消息（触发 popup 复位 converting）
+ * @param {string} message
+ */
+function sendErrorToPopup(message) {
+  broadcastToPopup('ERROR', message)
 }
 
 console.log('[SW] Service Worker 已启动')
