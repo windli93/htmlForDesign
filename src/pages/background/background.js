@@ -107,9 +107,8 @@ async function handleCaptureResult(captureResult, tabId) {
     // 处理图片（base64 化）
     await processCrossOriginImages(pageIr, tabId)
 
-    // 构建 .rp 文件
-    const blob = await buildRpFile(doc)
-    const url = URL.createObjectURL(blob)
+    // 构建 .rp 文件（返回 data URL）
+    const url = await buildRpFile(doc)
 
     // 触发下载
     await chrome.downloads.download({
@@ -206,9 +205,8 @@ async function handleConvertHtmlFiles(payload) {
 
     sendProgressToPopup('正在构建 RP 文件...')
 
-    // 构建 .rp
-    const blob = await buildRpFile(doc)
-    const url = URL.createObjectURL(blob)
+    // 构建 .rp（返回 data URL）
+    const url = await buildRpFile(doc)
 
     await chrome.downloads.download({
       url,
@@ -373,13 +371,13 @@ async function handleParseRp(payload) {
 
     sendProgressToPopup('正在打包...')
 
-    const blob = await htmlZip.generateAsync({
-      type: 'blob',
+    const base64 = await htmlZip.generateAsync({
+      type: 'base64',
       compression: 'DEFLATE',
       compressionOptions: { level: 6 }
     })
 
-    const url = URL.createObjectURL(blob)
+    const url = `data:application/zip;base64,${base64}`
     const outName = (payload.fileName || 'output').replace(/\.rp$/i, '') + '.html.zip'
 
     await chrome.downloads.download({

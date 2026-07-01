@@ -27,11 +27,12 @@ export async function buildRpFile(doc) {
     zip.file(`resources/images/${filename}`, base64, { base64: true })
   }
 
-  return zip.generateAsync({
-    type: 'blob',
+  const base64 = await zip.generateAsync({
+    type: 'base64',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 }
   })
+  return `data:application/zip;base64,${base64}`
 }
 
 /**
