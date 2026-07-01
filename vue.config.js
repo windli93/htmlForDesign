@@ -10,7 +10,7 @@ chromeName.forEach((name) => {
     ? `src/pages/${name}/index.html`
     : 'public/index.html'
   pages[name] = {
-    entry: `src/pages/${name}/main.js`,
+    entry: `src/pages/${name}/${name}.js`,
     template,
     filename: `${name}.html`
   }

@@ -8,10 +8,16 @@
 import { extractCaptureResult } from '../../lib/shared/extract-raw-dom.js'
 
 ;(function () {
+  const send = (msg, retries = 2) => {
+    chrome.runtime.sendMessage(msg).catch(() => {
+      if (retries > 0) setTimeout(() => send(msg, retries - 1), 200)
+    })
+  }
+
   try {
     const result = extractCaptureResult(document.body)
-    chrome.runtime.sendMessage({ type: 'CAPTURE_RESULT', payload: result })
+    send({ type: 'CAPTURE_RESULT', payload: result })
   } catch (err) {
-    chrome.runtime.sendMessage({ type: 'ERROR', payload: { message: 'DOM 抓取失败: ' + err.message } })
+    send({ type: 'ERROR', payload: { message: 'DOM 抓取失败: ' + err.message } })
   }
 })()

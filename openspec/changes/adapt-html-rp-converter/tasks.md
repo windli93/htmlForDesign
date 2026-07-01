@@ -23,7 +23,7 @@
 
 ## 5. F2 - Content Script 实现
 
-- [ ] 5.1 重写 `src/pages/content/main.js`：注入 extract-raw-dom.js，调用 extractCaptureResult(document.body) 并发送 CAPTURE_RESULT 消息回 service worker
+- [ ] 5.1 重写 `src/pages/content/popup.js`：注入 extract-raw-dom.js，调用 extractCaptureResult(document.body) 并发送 CAPTURE_RESULT 消息回 service worker
 
 ## 6. F3 - RP 解析与 HTML 生成
 
@@ -33,7 +33,7 @@
 
 ## 7. F1 - Offscreen Document 实现
 
-- [ ] 7.1 创建 `src/pages/offscreen/main.js`：监听 RENDER_HTML 消息，使用 iframe.srcdoc 渲染 HTML，调用 extractCaptureResult() 后回传结果
+- [ ] 7.1 创建 `src/pages/offscreen/popup.js`：监听 RENDER_HTML 消息，使用 iframe.srcdoc 渲染 HTML，调用 extractCaptureResult() 后回传结果
 - [ ] 7.2 创建 `src/pages/offscreen/index.html`：包含 iframe（sandbox=allow-same-origin）和入口脚本引用
 - [ ] 7.3 实现 HTML 预处理逻辑（inline CSS、绝对化资源路径）
 
@@ -44,7 +44,7 @@
 
 ## 9. Background Service Worker
 
-- [ ] 9.1 重写 `src/pages/background/main.js`：实现消息路由（CAPTURE_TAB、CONVERT_HTML_FILES、PARSE_RP），协调各模块完成转换流程，处理 PROGRESS/DONE/ERROR 消息回调
+- [ ] 9.1 重写 `src/pages/background/popup.js`：实现消息路由（CAPTURE_TAB、CONVERT_HTML_FILES、PARSE_RP），协调各模块完成转换流程，处理 PROGRESS/DONE/ERROR 消息回调
 
 ## 10. Popup UI（Vue 组件）
 

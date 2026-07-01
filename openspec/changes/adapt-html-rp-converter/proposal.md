@@ -29,9 +29,9 @@
 
 - 修改 `manifest.json`：更新 permissions、background、content_scripts 配置
 - 修改 `src/pages/popup/Index.vue`：替换为三 Tab 转换器 UI
-- 修改 `src/pages/popup/main.js`：保持 Vue 挂载不变
-- 修改 `src/pages/background/main.js`：实现 service worker 核心消息处理
-- 修改 `src/pages/content/main.js`：实现 DOM 抓取逻辑
+- 修改 `src/pages/popup/popup.js`：保持 Vue 挂载不变
+- 修改 `src/pages/background/popup.js`：实现 service worker 核心消息处理
+- 修改 `src/pages/content/popup.js`：实现 DOM 抓取逻辑
 - 新增 `src/pages/offscreen/`：离屏渲染页面
 - 新增 `src/lib/`：核心库文件（core、shared、utils）
 - 新增 `src/public/icons/`：图标资源

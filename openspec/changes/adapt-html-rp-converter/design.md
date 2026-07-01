@@ -47,7 +47,7 @@
 - **理由**：与方案一致，MV3 推荐的 service worker 写法
 
 ### 5. Content Script 不使用 import
-- **选型**：`content/main.js` 和 `lib/shared/extract-raw-dom.js` 使用普通函数（无 import/export）
+- **选型**：`content/popup.js` 和 `lib/shared/extract-raw-dom.js` 使用普通函数（无 import/export）
 - **理由**：`chrome.scripting.executeScript` 注入的文件按经典脚本执行，不支持 ES Module 语法
 
 ### 6. 图片资源处理策略

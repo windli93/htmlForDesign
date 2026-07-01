@@ -60,6 +60,7 @@
 
 <script>
 const MSG = {
+  PING: 'PING',
   CAPTURE_TAB: 'CAPTURE_TAB',
   CONVERT_HTML_FILES: 'CONVERT_HTML_FILES',
   PARSE_RP: 'PARSE_RP',
@@ -128,30 +129,46 @@ export default {
       if (file) this.rpFile = file
     },
 
+    // ========== SW 探活 ==========
+
+    async ensureSwReady (maxRetries = 5, delayMs = 150) {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          await chrome.runtime.sendMessage({ type: MSG.PING })
+          return // SW 已就绪
+        } catch {
+          if (i < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, delayMs))
+          }
+        }
+      }
+      throw new Error('无法连接到后台 Service Worker，请在 chrome://extensions 重载扩展后重试')
+    },
+
     // ========== F1: HTML → RP ==========
 
     async convertHtmlToRp () {
       if (this.htmlFiles.length === 0 || this.converting) return
       this.converting = true
-      this.progress.t1 = '准备中...'
+      this.progress.t1 = '正在连接后台服务...'
 
       try {
+        await this.ensureSwReady()
+
         const files = await Promise.all(this.htmlFiles.map(async (f) => ({
           name: f.name,
           html: await f.text()
         })))
 
+        this.progress.t1 = '准备中...'
         this.setProgressListener('t1')
 
-        chrome.runtime.sendMessage({
+        await chrome.runtime.sendMessage({
           type: MSG.CONVERT_HTML_FILES,
           payload: { files }
-        }).catch((err) => {
-          this.progress.t1 = '错误: 无法发送到后台（' + (err?.message || err) + '）'
-          this.converting = false
         })
       } catch (err) {
-        this.progress.t1 = '错误: ' + err.message
+        this.progress.t1 = '错误: ' + (err?.message || err)
         this.converting = false
       }
     },
@@ -161,14 +178,24 @@ export default {
     async capturePageToRp () {
       if (this.converting) return
       this.converting = true
-      this.progress.t2 = '正在注入 DOM 抓取脚本...'
+      this.progress.t2 = '正在连接后台服务...'
 
-      this.setProgressListener('t2')
+      try {
+        await this.ensureSwReady()
 
-      chrome.runtime.sendMessage({ type: MSG.CAPTURE_TAB }).catch((err) => {
-        this.progress.t2 = '错误: 无法发送到后台（' + (err?.message || err) + '）'
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+
+        this.setProgressListener('t2')
+        this.progress.t2 = '正在注入 DOM 抓取脚本...'
+
+        await chrome.runtime.sendMessage({
+          type: MSG.CAPTURE_TAB,
+          payload: { tabId: tab.id }
+        })
+      } catch (err) {
+        this.progress.t2 = '错误: ' + (err?.message || err)
         this.converting = false
-      })
+      }
     },
 
     // ========== F3: RP → HTML ==========
@@ -176,9 +203,12 @@ export default {
     async parseRpToHtml () {
       if (!this.rpFile || this.converting) return
       this.converting = true
-      this.progress.t3 = '读取文件中...'
+      this.progress.t3 = '正在连接后台服务...'
 
       try {
+        await this.ensureSwReady()
+
+        this.progress.t3 = '读取文件中...'
         const arrayBuffer = await this.rpFile.arrayBuffer()
         const uint8Array = new Uint8Array(arrayBuffer)
         let binaryStr = ''
@@ -189,15 +219,12 @@ export default {
 
         this.setProgressListener('t3')
 
-        chrome.runtime.sendMessage({
+        await chrome.runtime.sendMessage({
           type: MSG.PARSE_RP,
           payload: { rpBase64, fileName: this.rpFile.name }
-        }).catch((err) => {
-          this.progress.t3 = '错误: 无法发送到后台（' + (err?.message || err) + '）'
-          this.converting = false
         })
       } catch (err) {
-        this.progress.t3 = '错误: ' + err.message
+        this.progress.t3 = '错误: ' + (err?.message || err)
         this.converting = false
       }
     },

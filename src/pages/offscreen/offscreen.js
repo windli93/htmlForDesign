@@ -51,6 +51,7 @@ function renderHtml(payload) {
 
     // 等待 load 事件
     iframe.onload = function () {
+      clearTimeout(timeoutId)
       try {
         const doc = iframe.contentDocument
         if (!doc || !doc.body) {
@@ -71,11 +72,12 @@ function renderHtml(payload) {
     }
 
     iframe.onerror = function () {
+      clearTimeout(timeoutId)
       reject(new Error('iframe 加载失败'))
     }
 
     // 超时保护
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       reject(new Error('iframe 渲染超时'))
     }, 30000)
   })

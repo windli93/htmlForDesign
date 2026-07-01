@@ -9,6 +9,18 @@ import { XMLParser } from 'fast-xml-parser'
 import { isValidWidgetType, createDocument, createPage, defaultBounds, defaultStyle } from './widget-ir.js'
 
 /**
+ * 从 ARGB hex 提取 alpha 和 CSS 颜色
+ * @param {string} argbHex - 8 位 ARGB 十六进制（如 '80ffffff'）
+ * @returns {{ color: string, opacity: number }}
+ */
+function argbToStyle(argbHex) {
+  if (!argbHex || argbHex.length < 8) return { color: '#ffffff', opacity: 1 }
+  const alpha = parseInt(argbHex.slice(0, 2), 16) / 255
+  const hexColor = '#' + argbHex.slice(2)
+  return { color: hexColor, opacity: parseFloat(alpha.toFixed(2)) }
+}
+
+/**
  * 解析 document.xml 字符串为 DocumentIR
  * @param {string} xmlStr
  * @returns {import('./widget-ir.js').DocumentIR}
@@ -164,10 +176,14 @@ function parseWidgetStyle(w) {
   const fill = w['ax:fillStyle'] || w.fillStyle
   if (fill) {
     const color = fill['ax:fillColor'] || fill.fillColor
-    style.fill = {
-      type: fill.gradient && fill.gradient.enabled === 'true' ? 'none' : 'solid',
-      color: color ? '#' + (typeof color === 'object' ? (color.argb || 'ffffffff') : String(color)).slice(2) : '#ffffff',
-      opacity: 1
+    if (color) {
+      const argbHex = typeof color === 'object' ? (color.argb || 'ffffffff') : String(color)
+      const { color: hexColor, opacity } = argbToStyle(argbHex)
+      style.fill = {
+        type: fill.gradient && fill.gradient.enabled === 'true' ? 'none' : 'solid',
+        color: hexColor,
+        opacity
+      }
     }
     if (fill.gradient && fill.gradient.enabled === 'true') {
       // 渐变暂不支持
@@ -178,11 +194,14 @@ function parseWidgetStyle(w) {
   const border = w['ax:borderStyle'] || w.borderStyle
   if (border) {
     const color = border['ax:borderColor'] || border.borderColor
-    style.border = {
-      color: color ? '#' + (typeof color === 'object' ? (color.argb || 'ffcccccc') : String(color)).slice(2) : '#cccccc',
-      width: parseInt(border['ax:borderWidth'] || border.borderWidth || 1),
-      style: 'solid',
-      radius: parseInt(border['ax:borderRadius'] || border.borderRadius || 0)
+    if (color) {
+      const argbHex = typeof color === 'object' ? (color.argb || 'ffcccccc') : String(color)
+      style.border = {
+        color: argbToStyle(argbHex).color,
+        width: parseInt(border['ax:borderWidth'] || border.borderWidth || 1),
+        style: 'solid',
+        radius: parseInt(border['ax:borderRadius'] || border.borderRadius || 0)
+      }
     }
   }
 
@@ -190,15 +209,18 @@ function parseWidgetStyle(w) {
   const label = w['ax:labelStyle'] || w.labelStyle
   if (label) {
     const fontColor = label['ax:fontColor'] || label.fontColor
-    style.font = {
-      family: label['ax:fontName'] || label.fontName || 'Arial',
-      size: parseInt(label['ax:fontSize'] || label.fontSize || 14),
-      weight: (label['ax:bold'] || label.bold) === 'true' ? 'bold' : 'normal',
-      italic: (label['ax:italic'] || label.italic) === 'true',
-      underline: false,
-      color: fontColor ? '#' + (typeof fontColor === 'object' ? (fontColor.argb || 'ff333333') : String(fontColor)).slice(2) : '#333333',
-      align: label['ax:align'] || label.align || 'left',
-      lineHeight: parseFloat(label['ax:lineHeight'] || label.lineHeight || 1.5)
+    if (fontColor) {
+      const argbHex = typeof fontColor === 'object' ? (fontColor.argb || 'ff333333') : String(fontColor)
+      style.font = {
+        family: label['ax:fontName'] || label.fontName || 'Arial',
+        size: parseInt(label['ax:fontSize'] || label.fontSize || 14),
+        weight: (label['ax:bold'] || label.bold) === 'true' ? 'bold' : 'normal',
+        italic: (label['ax:italic'] || label.italic) === 'true',
+        underline: false,
+        color: argbToStyle(argbHex).color,
+        align: label['ax:align'] || label.align || 'left',
+        lineHeight: parseFloat(label['ax:lineHeight'] || label.lineHeight || 1.5)
+      }
     }
   }
 

@@ -24,9 +24,14 @@ import { XMLParser } from 'fast-xml-parser'
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.type) {
+    case 'PING':
+      sendResponse({ pong: true })
+      return false
+
     case 'CAPTURE_TAB':
-      handleCaptureTab(sender.tab?.id)
-      return false // popup 无回调，不保持端口
+      handleCaptureTab(msg.payload?.tabId)
+      sendResponse({ started: true })
+      return false
 
     case 'CAPTURE_RESULT':
       handleCaptureResult(msg.payload, sender.tab?.id)
@@ -35,10 +40,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     case 'CONVERT_HTML_FILES':
       handleConvertHtmlFiles(msg.payload)
+      sendResponse({ started: true })
       return false
 
     case 'PARSE_RP':
       handleParseRp(msg.payload)
+      sendResponse({ started: true })
       return false
 
     default:
@@ -58,8 +65,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function handleCaptureTab(tabId) {
   try {
     if (!tabId) {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      tabId = tab.id
+      // 兜底：改用 lastFocusedWindow 在 SW 上下文更可靠
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      tabId = tab?.id
+    }
+    if (!tabId) {
+      sendErrorToPopup('无法获取当前标签页 ID')
+      return
     }
 
     sendProgressToPopup('正在注入 DOM 抓取脚本...')
@@ -117,12 +129,12 @@ async function handleCaptureResult(captureResult, tabId) {
  * @param {import('../../lib/core/widget-ir.js').PageIR} pageIr
  * @param {number} tabId
  */
-async function processCrossOriginImages(pageIr, tabId) {
+async function processCrossOriginImages(pageIr, _tabId) {
   const promises = []
 
   function walkWidget(w) {
     if (w.type === 'Image' && w.src && !w.src.startsWith('data:')) {
-      promises.push(processImage(w, tabId))
+      promises.push(processImage(w))
     }
     if (w.children) w.children.forEach(walkWidget)
     if (w.states) w.states.forEach(state => state.forEach(walkWidget))
@@ -141,7 +153,7 @@ async function processCrossOriginImages(pageIr, tabId) {
  * @param {import('../../lib/core/widget-ir.js').WidgetIR} w
  * @param {number} tabId
  */
-async function processImage(w, tabId) {
+async function processImage(w) {
   try {
     if (isDataUrl(w.src) || w.src.startsWith('blob:')) {
       // data URL / blob URL - 直接（或 fetch blob 后）转 base64 data URL
@@ -333,17 +345,14 @@ async function handleParseRp(payload) {
 
     // 提取图片资源
     const images = {}
-    const imgFolder = zip.folder('resources/images')
-    if (imgFolder) {
-      const imgFiles = Object.keys(imgFolder.files)
-      for (const imgPath of imgFiles) {
-        const file = imgFolder.files[imgPath]
-        if (!file.dir) {
-          const base64 = await file.async('base64')
-          const name = imgPath.split('/').pop()
-          images[name] = base64
-        }
-      }
+    const IMAGE_PREFIX = 'resources/images/'
+    const imgPaths = Object.keys(zip.files).filter(
+      path => path.startsWith(IMAGE_PREFIX) && !zip.files[path].dir
+    )
+    for (const imgPath of imgPaths) {
+      const base64 = await zip.files[imgPath].async('base64')
+      const name = imgPath.slice(IMAGE_PREFIX.length)
+      images[name] = base64
     }
 
     sendProgressToPopup('正在生成 HTML 文件...')
