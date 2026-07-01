@@ -456,4 +456,3 @@ function sendErrorToPopup(message) {
 }
 
 console.log('[SW] Service Worker 已启动')
-
